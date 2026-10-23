@@ -1,0 +1,116 @@
+# OTReader configuration.  Values shown are the defaults unless noted.
+# Validate with:  python -m app.main --config config.yaml --check-config
+
+reader:
+  host_file: /var/run/reader      # reader IP address is read from this file (retried every 5 s until valid)
+  host_file_poll_seconds: 5
+  # host: "192.168.8.23"          # used only if host_file is set to null
+  port: 5084                      # LLRP port
+  reconnect_interval: 5           # first reconnect delay (s); doubles per failure...
+  reconnect_max_interval: 60      # ...up to this ceiling (s)
+  connection_timeout: 10          # TCP connect / command response timeout (s)
+  keepalive_interval_ms: 5000     # LLRP KEEPALIVE period; 0 disables the watchdog
+  keepalive_missed_limit: 3       # declare the link dead after this many missed keepalives
+  auto_connect: true              # connect at startup and keep reconnecting
+  antennas: null                  # null = all antennas; or e.g. [1, 2]
+  impinj_extensions: auto         # auto (try if manufacturer is Impinj) | enabled | disabled
+  reset_to_factory_default: false # send SET_READER_CONFIG ResetToFactoryDefault on connect
+  delete_existing_rospecs: true   # remove ROSpecs/AccessSpecs left by other clients
+
+  # SSH access to the reader's management shell (Impinj RShell).
+  ssh:
+    username: root
+    password: impinj
+    port: 22
+    timeout_seconds: 10
+    legacy_host_keys: true        # allow ssh-rsa/ssh-dss (older Impinj firmware; = HostKeyAlgorithms=+ssh-rsa)
+
+  # Set the reader clock from this host's clock when the application starts
+  # (RShell "config system time", timed to the second boundary).
+  time_sync:
+    enabled: true
+    tolerance_ms: 20              # retry if the estimated error is larger...
+    max_attempts: 3               # ...up to this many times
+    processing_estimate_ms: 60    # initial guess of RShell's processing delay (R420: 50-100 ms)
+    require_host_clock_synchronized: true  # skip if this host has no synchronised time source (e.g. Pi without NTP/GPS)
+
+  # Per-mode inventory profiles (see README "Operating modes").
+  start_line:
+    session: 2
+    tag_population: 256
+    impinj_search_mode: Single_Target   # Reader_Selected | Single_Target | Dual_Target | Single_Target_With_Suppression
+    rf_mode: auto                       # auto | reader_default | <ModeIdentifier from /reader/capabilities>
+    rf_mode_strategy: robust            # robust | throughput (used when rf_mode = auto)
+    transmit_power_dbm: null            # null = reader default
+    receive_sensitivity_db: null
+    enable_impinj_peak_rssi: true
+    enable_impinj_phase_angle: false
+    enable_impinj_doppler: false
+  finish_line:
+    session: 0
+    tag_population: 32
+    impinj_search_mode: Dual_Target
+    rf_mode: auto
+    rf_mode_strategy: throughput
+    transmit_power_dbm: null
+    receive_sensitivity_db: null
+    enable_impinj_peak_rssi: true
+    enable_impinj_phase_angle: true
+    enable_impinj_doppler: true
+  test:
+    session: 0
+    tag_population: 32
+    impinj_search_mode: Dual_Target
+    rf_mode: auto
+    rf_mode_strategy: throughput
+
+application:
+  mode: finish_line               # start_line | finish_line (initial mode)
+  log_level: INFO
+  log_file: otreader.log          # relative to data_directory; null = console only
+  log_rotation: internal          # internal (size-based) | external (logrotate-friendly)
+  log_max_bytes: 10485760
+  log_backup_count: 10
+  data_directory: ./data
+  persistence_interval: 5         # inventory snapshot interval (s)
+  auto_start_inventory: false     # start inventory on first boot
+  resume_inventory_on_restart: true
+
+timing:
+  cooldown_seconds: 300
+  finish_estimation_window_seconds: 2.0   # silence before a finish pass is finalised
+  finish_max_pass_seconds: 30
+  finish_max_observations_per_pass: 5000
+  finish_cluster_gap_seconds: 1.0
+  finish_top_window_db: 10.0
+  finish_min_fit_points: 5
+  finish_peak_tie_db: 3.0
+  finish_time_offset_ms: 0.0              # calibration offset added to finish estimates
+  clock_mode: auto                        # auto | reader | reader_corrected | host
+  max_reader_clock_offset_seconds: 2.0
+
+callbacks:
+  url: null                       # e.g. "http://192.168.8.20:8080/rfid/events"
+  timeout_seconds: 3
+  max_retries: 3
+  retry_delay_seconds: 1
+  retry_max_delay_seconds: 60
+  queue_max_size: 1000            # in-memory bound; overflow waits on disk
+  concurrency: 1                  # 1 preserves delivery order
+  max_response_bytes: 65536
+  secret: null                    # set to sign requests (X-OTReader-Signature: sha256=...)
+  allow_loopback: true
+  allow_private_networks: true
+  allow_public_networks: true
+  allowed_networks: null          # e.g. ["192.168.8.0/24"]
+
+api:
+  host: "0.0.0.0"
+  port: 2000
+  api_key: null                   # set to require X-API-Key / Bearer auth
+  cors_origins: []
+  max_request_bytes: 65536
+  reader_operation_timeout_seconds: 60
+
+test_mode:
+  buffer_size: 5000

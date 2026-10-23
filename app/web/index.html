@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OTReader</title>
+<style>
+  :root {
+    --bg: #0e1318; --card: #161d24; --card2: #1c242d; --line: #2a333d;
+    --text: #e6edf3; --muted: #8b98a5; --good: #3fb950; --bad: #f85149; --warn: #d29922; --accent: #58a6ff;
+    --track-on: #0b4a1d;      /* dark green: antenna connected */
+    --track-off: #2a3139;     /* grey: disconnected / unknown */
+    --meter: #2bff5c;         /* bright green: current read + peak mark */
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: #0b1015; position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; padding: 16px 20px 40px; max-width: 1400px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--card2); border: 1px solid var(--line); }
+  .pill.good { color: var(--good); border-color: #23572e; } .pill.bad { color: var(--bad); border-color: #6b2522; }
+  .pill.warn { color: var(--warn); border-color: #5c4513; } .pill.info { color: var(--accent); border-color: #1f4a7a; }
+  button { font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 14px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #1f6f3a; border-color: #2c8a4a; }
+  button.danger { background: #6b2522; border-color: #8a302c; }
+  button.seg { border-radius: 0; margin-left: -1px; } button.seg:first-child { border-radius: 7px 0 0 7px; } button.seg:last-child { border-radius: 0 7px 7px 0; }
+  button.seg.active { background: #1f4a7a; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .label { color: var(--muted); min-width: 90px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .muted { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; max-width: min(460px, 90vw); }
+  .toast { background: var(--card2); border: 1px solid var(--line); border-left: 4px solid var(--accent); padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 20px #0008; }
+  .toast.error { border-left-color: var(--bad); } .toast.ok { border-left-color: var(--good); }
+  .banner { display: none; background: #3a2a0d; border: 1px solid #5c4513; color: #f0c674; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; }
+  /* Peak meter */
+  .meters { display: grid; grid-template-columns: max-content minmax(160px, 1fr) repeat(5, max-content); gap: 8px 14px; align-items: center; }
+  .meter { position: relative; height: 20px; border-radius: 4px; background: var(--track-off); overflow: visible; }
+  .meter.on { background: var(--track-on); }
+  .meter .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--meter); border-radius: 4px 0 0 4px; transition: width 90ms linear; }
+  .meter .peak { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: var(--meter); box-shadow: 0 0 6px var(--meter); display: none; border-radius: 1px; }
+  .scale { position: relative; height: 16px; color: var(--muted); font-size: 11px; }
+  .scale span { position: absolute; transform: translateX(-50%); }
+  .seen-yes { color: var(--good); font-weight: 600; } .seen-no { color: var(--warn); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
+  .sw { display: inline-block; width: 22px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .testbig { font-size: 15px; margin: 6px 0 12px; }
+  details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
+  /* Collapsible panel header */
+  button.collapser { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: inherit; border-radius: 4px; padding: 2px 4px 2px 0; }
+  button.collapser:hover { color: var(--text); }
+  button.collapser:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chev { transition: transform 150ms ease; }
+  .collapsed .chev { transform: rotate(-90deg); }
+  .collapsed #test-body { display: none; }
+  .card.collapsed h2 { margin-bottom: 0; }
+  .h2-actions { margin-left: auto; display: flex; gap: 6px; text-transform: none; letter-spacing: normal; }
+  .h2-note { text-transform: none; letter-spacing: normal; font-weight: 400; font-size: 12px; }
+  button.small { padding: 3px 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OTReader</h1>
+  <span id="hdr-conn" class="pill">loading…</span>
+  <span id="hdr-reading" class="pill">—</span>
+  <span id="hdr-addr" class="muted mono"></span>
+  <span class="spacer"></span>
+  <a href="/docs" class="muted" target="_blank" rel="noopener">API docs</a>
+  <button id="btn-key" title="Set the API key (only needed if the middleware requires one)">API key</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Reader</h2>
+    <dl id="reader-info"></dl>
+  </section>
+
+  <section class="card">
+    <h2>Control</h2>
+    <div id="ctl-banner" class="banner"></div>
+    <div class="row"><span class="label">Connection</span>
+      <button id="btn-connect">Connect</button>
+      <button id="btn-reconnect">Reconnect</button>
+      <button id="btn-disconnect">Disconnect</button>
+    </div>
+    <div class="row"><span class="label">Profile</span>
+      <span>
+        <button class="seg" id="btn-mode-start" data-mode="start_line">Start line</button><button class="seg" id="btn-mode-finish" data-mode="finish_line">Finish line</button>
+      </span>
+    </div>
+    <div class="row"><span class="label">Reading</span>
+      <button id="btn-start" class="primary">Start reading</button>
+      <button id="btn-stop" class="danger">Stop reading</button>
+    </div>
+    <div class="row"><span class="label">Reader clock</span>
+      <button id="btn-sync-time" title="Set the reader's clock from this server's clock (not allowed while reading)">Set reader clock</button>
+      <span id="sync-note" class="muted"></span>
+    </div>
+    <dl id="profile-info" style="margin-top:12px"></dl>
+  </section>
+
+  <section class="card">
+    <h2>Antennas</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Antenna</th><th>Status</th><th class="num">Gain</th></tr></thead>
+      <tbody id="antenna-rows"></tbody>
+    </table></div>
+    <details><summary>Reader capabilities</summary><dl id="caps-info"></dl></details>
+  </section>
+
+  <section class="card wide" id="test-card">
+    <h2>
+      <button id="test-toggle" class="collapser" aria-expanded="true" aria-controls="test-body" title="Collapse / expand">
+        <svg class="chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Antenna test
+      </button>
+      <span id="test-pill" class="pill">inactive</span>
+    </h2>
+    <div id="test-body">
+    <div class="row">
+      <button id="btn-test-start" class="primary">Start antenna test</button>
+      <button id="btn-test-stop" class="danger">Stop antenna test</button>
+      <span class="muted">Test reads never create timing events. Timing reading pauses during the test and resumes afterwards.</span>
+    </div>
+    <div id="test-summary" class="testbig muted">Start the test, then pass a tag over each antenna.</div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--track-on)"></span>connected</span>
+      <span><span class="sw" style="background:var(--track-off)"></span>not connected</span>
+      <span><span class="sw" style="background:var(--meter)"></span>current read</span>
+      <span><span class="sw" style="background:var(--meter);width:3px;box-shadow:0 0 6px var(--meter)"></span>&nbsp;session peak</span>
+    </div>
+    <div class="scroll"><div id="meters" class="meters"></div></div>
+    <details open><summary>Recent test reads</summary>
+      <div class="scroll"><table>
+        <thead><tr><th>Time (UTC)</th><th>Antenna</th><th>EPC</th><th class="num">RSSI</th><th class="num">Phase</th><th class="num">Doppler</th></tr></thead>
+        <tbody id="test-reads"></tbody>
+      </table></div>
+    </details>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>Recent timing events
+      <span id="events-note" class="h2-note"></span>
+      <span class="h2-actions">
+        <button id="btn-events-showall" class="small" title="Show the recent events again">Show all</button>
+        <button id="btn-events-clear" class="small" title="Clear this list. Events stay in the event log (export, rewind and callbacks are unaffected).">Clear</button>
+      </span>
+    </h2>
+    <div class="scroll"><table>
+      <thead><tr><th class="num">#</th><th>Time (UTC)</th><th>EPC</th><th>Mode</th><th class="num">Antenna</th><th class="num">Peak RSSI</th><th class="num">Reads</th><th>Method</th><th>Confidence</th></tr></thead>
+      <tbody id="event-rows"></tbody>
+    </table></div>
+  </section>
+</main>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+const API = "/api/v1";
+const METER_MIN = -85, METER_MAX = -25;   // dBm scale
+const HOLD_MS = 1000;                      // current-read bar holds this long after the last read
+
+const S = {
+  status: null, caps: null, busy: false, key: loadKey(),
+  lastConnectedAt: undefined,
+  test: { active: false, after: 0, current: {}, summary: null, reads: [], startedAt: null },
+};
+
+// ------------------------------------------------------------------ helpers
+function loadKey() { try { return localStorage.getItem("otreader.apiKey") || ""; } catch { return ""; } }
+function saveKey(k) { try { k ? localStorage.setItem("otreader.apiKey", k) : localStorage.removeItem("otreader.apiKey"); } catch {} }
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v; else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(c == null ? "" : String(c)));
+  return e;
+}
+const dash = (v) => (v === null || v === undefined || v === "" ? "—" : v);
+const fmtTime = (iso) => (iso ? iso.slice(11, 23) : "—");
+const fmtRssi = (v) => (v === null || v === undefined ? "—" : v.toFixed(1) + " dBm");
+function toast(msg, kind = "info", ms = 5000) {
+  const t = el("div", { class: "toast " + kind }, msg);
+  $("toasts").append(t);
+  setTimeout(() => t.remove(), ms);
+}
+function fillDl(dl, pairs) {
+  dl.replaceChildren(...pairs.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v instanceof Node ? v : dash(v))]));
+}
+function pill(text, kind) { return el("span", { class: "pill " + (kind || "") }, text); }
+
+async function api(method, path, body) {
+  const headers = {};
+  if (S.key) headers["X-API-Key"] = S.key;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  let r;
+  try {
+    r = await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) {
+    throw new Error("Cannot reach the middleware: " + e.message);
+  }
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if (r.status === 401 && !S.keyDeclined) { askKey("This middleware requires an API key."); }
+  if (!r.ok) {
+    const msg = data && data.error ? data.error.message : "HTTP " + r.status;
+    const err = new Error(msg); err.status = r.status; throw err;
+  }
+  return data;
+}
+
+function askKey(reason) {
+  if (S.askingKey) return;
+  S.askingKey = true;
+  const k = prompt((reason ? reason + "\n\n" : "") + "API key (leave empty for none):", S.key);
+  S.askingKey = false;
+  // A cancelled prompt is not repeated by the background polling; use the "API key" button instead.
+  S.keyDeclined = k === null;
+  if (k !== null) { S.key = k.trim(); saveKey(S.key); refreshAll(); }
+}
+
+// Run a state-changing operation: disables controls, reports errors, refreshes.
+async function operate(label, fn) {
+  if (S.busy) return;
+  S.busy = true; renderControls();
+  toast(label + "…", "info", 2500);
+  try {
+    const result = await fn();
+    toast(label + " — done", "ok", 3000);
+    return result;
+  } catch (e) {
+    toast(label + " failed: " + e.message, "error", 9000);
+  } finally {
+    S.busy = false;
+    await refreshStatus();
+    await refreshCaps(true);
+    renderControls();
+  }
+}
+
+// ------------------------------------------------------------------ status / capabilities
+const STATE_KIND = { inventorying: "good", idle: "info", disconnected: "bad", reconnect_wait: "warn", waiting_for_address: "warn" };
+
+async function refreshStatus() {
+  try {
+    S.status = await api("GET", "/reader/status");
+  } catch (e) {
+    S.status = null;
+    $("hdr-conn").replaceWith(Object.assign(pill("middleware unreachable", "bad"), { id: "hdr-conn" }));
+    renderControls();
+    return;
+  }
+  const st = S.status;
+  if (st.last_connected_at !== S.lastConnectedAt) { S.lastConnectedAt = st.last_connected_at; refreshCaps(true); }
+  const connText = st.connected ? "connected" : st.connection_state.replaceAll("_", " ");
+  $("hdr-conn").replaceWith(Object.assign(pill(connText, st.connected ? "good" : STATE_KIND[st.connection_state] || "warn"), { id: "hdr-conn" }));
+  const reading = st.test_mode_active ? pill("antenna test", "warn")
+    : st.inventorying ? pill("reading · " + st.mode.replace("_", " "), "good") : pill("not reading", "");
+  $("hdr-reading").replaceWith(Object.assign(reading, { id: "hdr-reading" }));
+  $("hdr-addr").textContent = st.host ? st.host + ":" + st.port : "no reader address yet";
+  renderReader();
+  renderControls();
+  const wasActive = S.test.active;
+  S.test.active = !!st.test_mode_active;
+  if (S.test.active && !wasActive) startTestLoop();
+  if (!S.test.active) $("test-pill").replaceWith(Object.assign(pill("inactive", ""), { id: "test-pill" }));
+}
+
+async function refreshCaps(force) {
+  if (!force && S.caps) return;
+  try { S.caps = await api("GET", "/reader/capabilities"); } catch { return; }
+  renderReader(); renderAntennas(); renderCapsInfo(); renderProfile(); renderMeters();
+}
+
+function renderReader() {
+  const st = S.status || {}, c = S.caps || {};
+  const impinj = st.impinj_extensions === true ? "enabled" : st.impinj_extensions === false ? "not supported" : "not available";
+  const ants = c.max_antennas ? `${c.max_antennas} supported · connected: ${(c.connected_antennas || []).join(", ") || "none"}` : null;
+  const clock = st.clock && st.clock.reader_minus_host_ms !== null && st.clock.reader_minus_host_ms !== undefined
+    ? `${st.clock.reader_minus_host_ms} ms vs host${st.clock.correction_active ? " (corrected)" : ""}` : null;
+  const pairs = [
+    ["Manufacturer", st.manufacturer], ["Model", st.model], ["Serial number", st.serial_number],
+    ["Firmware", st.firmware_version], ["Impinj extensions", impinj], ["Antennas", ants],
+    ["Address", st.host ? `${st.host}:${st.port}` : st.address_problem ? el("span", { style: "color:var(--warn)" }, st.address_problem) : null],
+    ["Address source", st.address_source ? st.address_source.replace(/^file:/, "file ") : null],
+    ["State", st.connection_state],
+    ["Last connected", st.last_connected_at], ["Reader clock", clock],
+  ];
+  const ts = st.time_sync;
+  if (ts) {
+    const off = ts.measured_offset_ms ?? ts.estimated_offset_ms;
+    pairs.push(["Reader clock set", ts.success
+      ? `${ts.started_at.slice(11, 19)} UTC · ${off >= 0 ? "+" : ""}${off} ms ${ts.measured_offset_ms !== null && ts.measured_offset_ms !== undefined ? "measured" : "estimated"}`
+      : el("span", { style: "color:var(--warn)" }, `failed: ${ts.error}`)]);
+  }
+  if (c.impinj && c.impinj.temperature_c !== null && c.impinj.temperature_c !== undefined) pairs.push(["Temperature", c.impinj.temperature_c + " °C"]);
+  if (st.next_reconnect_at && !st.connected) pairs.push(["Next reconnect", st.next_reconnect_at]);
+  if (st.last_error) pairs.push(["Last error", el("span", { style: "color:var(--bad)" }, `${st.last_error.message} (${st.last_error.at})`)]);
+  fillDl($("reader-info"), pairs);
+}
+
+function renderAntennas() {
+  const c = S.caps || {};
+  const byId = new Map((c.antennas || []).map((a) => [a.antenna_id, a]));
+  for (let i = 1; i <= (c.max_antennas || 0); i++) if (!byId.has(i)) byId.set(i, { antenna_id: i, connected: null });
+  const rows = [...byId.values()].sort((a, b) => a.antenna_id - b.antenna_id).map((a) => el("tr", {},
+    el("td", {}, "Antenna " + a.antenna_id),
+    el("td", {}, a.connected === true ? pill("connected", "good") : a.connected === false ? pill("disconnected", "bad") : pill("unknown", "")),
+    el("td", { class: "num" }, a.gain_dbi_x100 === null || a.gain_dbi_x100 === undefined ? "—" : (a.gain_dbi_x100 / 100).toFixed(2) + " dBi")));
+  $("antenna-rows").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 3, class: "muted" }, "No antenna information (reader not connected yet)."))]));
+}
+
+function renderCapsInfo() {
+  const c = S.caps || {};
+  const p = c.transmit_power_levels || [];
+  const reg = c.regulatory || {};
+  fillDl($("caps-info"), [
+    ["Transmit power", p.length ? `${p[0].dbm} – ${p[p.length - 1].dbm} dBm (${p.length} steps)` : null],
+    ["RF modes", (c.rf_modes || []).map((m) => `${m.mode_id} (${m.m_value}, ${Math.round(m.bdr_bps / 1000)} kbps, ${m.spectral_mask})`).join("; ") || null],
+    ["Regulatory", reg.communications_standard ? `${reg.communications_standard}, country ${reg.country_code}${reg.hopping ? ", hopping" : ""}` : null],
+    ["Reader ID", c.reader_id], ["Max ROSpecs", c.llrp ? c.llrp.max_rospecs : null],
+    ["Discovered", c.discovered_at],
+  ]);
+}
+
+function renderProfile() {
+  const st = S.status || {}, c = S.caps || {};
+  const applied = (c.applied_configuration || {})[st.mode];
+  if (!applied) { fillDl($("profile-info"), [["Active profile", st.mode ? st.mode.replace("_", " ") + " (not yet applied to reader)" : null]]); return; }
+  const fails = (applied.negotiation_failures || []).length;
+  fillDl($("profile-info"), [
+    ["Active profile", st.mode.replace("_", " ")],
+    ["Session", applied.session], ["Search mode", applied.impinj_search_mode || "standard LLRP"],
+    ["RF mode", applied.rf_mode_id === null ? "reader default" : `${applied.rf_mode_id} — ${applied.rf_mode_reason}`],
+    ["Tx power", applied.transmit_power_dbm === null ? "reader default" : applied.transmit_power_dbm + " dBm"],
+    ["Antennas", Array.isArray(applied.antennas) ? applied.antennas.join(", ") : applied.antennas],
+    ["Fallbacks", fails ? `${fails} option set(s) rejected by reader` : "none"],
+  ]);
+}
+
+function renderControls() {
+  const st = S.status, busy = S.busy || !st;
+  const connected = st && st.connected, testing = st && st.test_mode_active, reading = st && st.inventorying;
+  $("btn-connect").disabled = busy || connected || (st && st.connection_state === "waiting_for_address");
+  $("btn-reconnect").disabled = busy;
+  $("btn-disconnect").disabled = busy || !st || st.connection_state === "disconnected";
+  $("btn-start").disabled = busy || !connected || reading || testing;
+  $("btn-stop").disabled = busy || !reading;
+  for (const b of [$("btn-mode-start"), $("btn-mode-finish")]) {
+    b.disabled = busy || testing;
+    b.classList.toggle("active", !!st && st.mode === b.dataset.mode);
+  }
+  $("btn-sync-time").disabled = busy || reading || testing;
+  $("sync-note").textContent = reading || testing ? "stop reading to set the clock" : "";
+  $("btn-test-start").disabled = busy || !connected || testing;
+  $("btn-test-stop").disabled = busy || !testing;
+  const banner = $("ctl-banner");
+  const msg = !st ? "Middleware not reachable." : testing ? "Antenna test is running — timing controls are locked until the test is stopped."
+    : st.connection_state === "waiting_for_address" ? `Waiting for the reader address: ${st.address_problem || "checking"}. Retrying automatically.`
+    : !connected ? `Reader not connected (${st.connection_state.replaceAll("_", " ")}).` : "";
+  banner.textContent = msg; banner.style.display = msg ? "block" : "none";
+  renderProfile();
+}
+
+// ------------------------------------------------------------------ actions
+$("btn-connect").onclick = () => operate("Connect", () => api("POST", "/reader/connect"));
+$("btn-reconnect").onclick = () => operate("Reconnect", () => api("POST", "/reader/reconnect"));
+$("btn-disconnect").onclick = () => {
+  if (S.status && S.status.inventorying && !confirm("The reader is reading. Disconnecting stops timing. Continue?")) return;
+  operate("Disconnect", () => api("POST", "/reader/disconnect"));
+};
+$("btn-start").onclick = () => operate("Start reading", () => api("POST", "/reader/start"));
+$("btn-stop").onclick = () => {
+  if (!confirm("Stop reading? No timing events will be recorded until reading is started again.")) return;
+  operate("Stop reading", () => api("POST", "/reader/stop"));
+};
+for (const b of [$("btn-mode-start"), $("btn-mode-finish")]) {
+  b.onclick = async () => {
+    const st = S.status; const mode = b.dataset.mode; const name = b.textContent;
+    if (!st || st.mode === mode) return;
+    if (st.inventorying && !confirm(`Switch to the ${name} profile? Reading pauses briefly while the reader is reconfigured.`)) return;
+    const r = await operate(`Set ${name} profile`, () => api("PUT", "/reader/mode", { mode }));
+    if (r && r.applied_to_reader === false) toast("Reader not connected: the profile will be applied when it connects.", "info", 7000);
+  };
+}
+$("btn-test-start").onclick = async () => {
+  if (S.status && S.status.inventorying &&
+      !confirm("Timing reading is running. The antenna test pauses it (no timing events are recorded during the test) and resumes it when the test stops. Continue?")) return;
+  resetTest();
+  const r = await operate("Start antenna test", () => api("POST", "/test/start"));
+  if (r) startTestLoop();
+};
+$("btn-test-stop").onclick = () => operate("Stop antenna test", () => api("POST", "/test/stop"));
+$("btn-sync-time").onclick = async () => {
+  const r = await operate("Set reader clock", () => api("POST", "/reader/sync-time"));
+  if (r && r.estimated_offset_ms !== null && r.estimated_offset_ms !== undefined)
+    toast(`Reader clock set (${r.command.split(" ").pop()} UTC), estimated ${r.estimated_offset_ms >= 0 ? "+" : ""}${r.estimated_offset_ms} ms`, "ok", 8000);
+};
+$("btn-key").onclick = () => { S.keyDeclined = false; askKey(""); };
+
+// Collapsible antenna test panel (state remembered per browser).
+function setTestCollapsed(collapsed) {
+  $("test-card").classList.toggle("collapsed", collapsed);
+  $("test-toggle").setAttribute("aria-expanded", String(!collapsed));
+  try { localStorage.setItem("otreader.testCollapsed", collapsed ? "1" : "0"); } catch {}
+}
+$("test-toggle").onclick = () => setTestCollapsed(!$("test-card").classList.contains("collapsed"));
+try { setTestCollapsed(localStorage.getItem("otreader.testCollapsed") === "1"); } catch {}
+
+// ------------------------------------------------------------------ antenna test + peak meter
+function resetTest() { S.test.after = 0; S.test.current = {}; S.test.summary = null; S.test.reads = []; S.test.startedAt = Date.now(); }
+
+let testTimer = null;
+function startTestLoop() {
+  if (testTimer) return;
+  if (!S.test.startedAt) S.test.startedAt = Date.now();
+  const tick = async () => {
+    testTimer = null;
+    try {
+      const d = await api("GET", `/test/reports?after_sequence=${S.test.after}&limit=1000`);
+      const now = Date.now();
+      for (const r of d.reports) {
+        if (r.antenna !== null && r.rssi !== null) S.test.current[r.antenna] = { rssi: r.rssi, at: now };
+        S.test.reads.push(r);
+      }
+      S.test.reads = S.test.reads.slice(-12);
+      S.test.after = d.next_after_sequence;
+      S.test.summary = d.summary;
+      S.test.active = d.test_mode_active;
+      renderMeters(); renderTestReads();
+    } catch (e) { /* transient; status polling reports connectivity */ }
+    if (S.test.active) testTimer = setTimeout(tick, 250);
+    else { renderMeters(); S.test.startedAt = null; }
+  };
+  tick();
+}
+
+const pct = (rssi) => Math.max(0, Math.min(100, ((rssi - METER_MIN) / (METER_MAX - METER_MIN)) * 100));
+
+function antennaList() {
+  const c = S.caps || {};
+  const m = new Map((c.antennas || []).map((a) => [a.antenna_id, a.connected]));
+  for (let i = 1; i <= (c.max_antennas || 0); i++) if (!m.has(i)) m.set(i, null);
+  for (const a of ((S.test.summary || {}).per_antenna || [])) if (a.antenna !== null && !m.has(a.antenna)) m.set(a.antenna, null);
+  return [...m.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+function renderMeters() {
+  const box = $("meters"); if (!box) return;
+  const per = new Map((((S.test.summary || {}).per_antenna) || []).map((a) => [a.antenna, a]));
+  const now = Date.now();
+  const cells = [el("span", { class: "muted" }, ""), el("span", { class: "muted" }, "Signal (dBm)"),
+    ...["Now", "Peak", "Reads", "Tags", "Tag seen"].map((h) => el("span", { class: "muted", style: "font-size:12px" }, h))];
+  let seenCount = 0;
+  const ants = antennaList();
+  for (const [id, connected] of ants) {
+    const s = per.get(id) || {};
+    const cur = S.test.current[id] && now - S.test.current[id].at <= HOLD_MS ? S.test.current[id].rssi : null;
+    const seen = (s.reads || 0) > 0; if (seen) seenCount++;
+    const meter = el("div", { class: "meter" + (connected ? " on" : ""), title: connected === false ? "disconnected" : connected ? "connected" : "connection unknown" });
+    const fill = el("div", { class: "fill" }); fill.style.width = cur === null ? "0%" : Math.max(1, pct(cur)) + "%";
+    const peak = el("div", { class: "peak" });
+    if (s.rssi_max !== null && s.rssi_max !== undefined) { peak.style.display = "block"; peak.style.left = pct(s.rssi_max) + "%"; }
+    meter.append(fill, peak);
+    cells.push(
+      el("span", {}, `Antenna ${id}`, connected === false ? el("span", { class: "pill bad", style: "margin-left:6px" }, "disconnected") : ""),
+      meter,
+      el("span", { class: "mono num" }, cur === null ? "—" : cur.toFixed(1)),
+      el("span", { class: "mono num" }, s.rssi_max === null || s.rssi_max === undefined ? "—" : s.rssi_max.toFixed(1)),
+      el("span", { class: "mono num" }, s.reads || 0),
+      el("span", { class: "mono num" }, s.unique_tags || 0),
+      el("span", { class: seen ? "seen-yes" : "seen-no" }, seen ? "YES" : "no"));
+  }
+  const scale = el("div", { class: "scale" });
+  for (let v = Math.ceil(METER_MIN / 10) * 10; v <= METER_MAX; v += 10) scale.append(el("span", { style: `left:${pct(v)}%` }, v));
+  cells.push(el("span"), scale, el("span"), el("span"), el("span"), el("span"), el("span"));
+  box.replaceChildren(...cells);
+
+  const sum = S.test.summary;
+  if (S.test.active) {
+    const secs = S.test.startedAt ? Math.round((now - S.test.startedAt) / 1000) : 0;
+    $("test-summary").textContent = `${seenCount} of ${ants.length} antennas have seen a tag · ${sum ? sum.unique_tags : 0} unique tag(s) · ${sum ? sum.total_reads : 0} reads · ${secs} s`;
+    $("test-summary").className = "testbig";
+    $("test-pill").replaceWith(Object.assign(pill("running", "warn"), { id: "test-pill" }));
+  } else if (sum) {
+    $("test-summary").textContent = `Last test: ${seenCount} of ${ants.length} antennas saw a tag · ${sum.unique_tags} unique tag(s) · ${sum.total_reads} reads`;
+    $("test-summary").className = "testbig muted";
+  }
+}
+
+function renderTestReads() {
+  const rows = S.test.reads.slice().reverse().map((r) => el("tr", {},
+    el("td", { class: "mono" }, fmtTime(r.timestamp)), el("td", {}, dash(r.antenna)), el("td", { class: "mono" }, r.epc),
+    el("td", { class: "num mono" }, fmtRssi(r.rssi)),
+    el("td", { class: "num mono" }, r.phase_angle_deg === null ? "—" : r.phase_angle_deg.toFixed(0) + "°"),
+    el("td", { class: "num mono" }, r.doppler_hz === null ? "—" : r.doppler_hz.toFixed(1) + " Hz")));
+  $("test-reads").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 6, class: "muted" }, "No test reads yet."))]));
+}
+
+// ------------------------------------------------------------------ events
+// "Clear" only hides events from this list (per browser): the event log is append-only
+// race data and is never deleted from here.  S.eventsClearedAfter is the highest sequence
+// that was on screen when Clear was clicked.
+function loadClear() {
+  try { return JSON.parse(localStorage.getItem("otreader.eventsCleared") || "null"); } catch { return null; }
+}
+function saveClear(v) {
+  try { v ? localStorage.setItem("otreader.eventsCleared", JSON.stringify(v)) : localStorage.removeItem("otreader.eventsCleared"); } catch {}
+}
+S.eventsCleared = loadClear();  // {after: sequence, at: ISO time} or null
+
+async function refreshEvents() {
+  let d;
+  try { d = await api("GET", "/events?order_by=sequence&order=desc&limit=15"); } catch { return; }
+  const newest = d.events.length ? d.events[0].sequence : 0;
+  S.newestEventSeq = newest;
+  // If the log is now shorter than the clear point (e.g. a fresh data directory), forget the clear.
+  if (S.eventsCleared && S.eventsCleared.after > newest) { S.eventsCleared = null; saveClear(null); }
+  const after = S.eventsCleared ? S.eventsCleared.after : 0;
+  const shown = d.events.filter((e) => e.sequence > after);
+  const rows = shown.map((e) => el("tr", {},
+    el("td", { class: "num mono" }, e.sequence), el("td", { class: "mono" }, fmtTime(e.timestamp)),
+    el("td", { class: "mono" }, e.epc), el("td", {}, e.mode.replace("_", " ")), el("td", { class: "num" }, dash(e.antenna)),
+    el("td", { class: "num mono" }, fmtRssi(e.peak_rssi)), el("td", { class: "num" }, e.observation_count),
+    el("td", {}, e.estimation_method.replaceAll("_", " ")),
+    el("td", {}, pill(e.confidence, { high: "good", medium: "info", low: "warn" }[e.confidence]))));
+  const empty = S.eventsCleared
+    ? `List cleared at ${fmtTime(S.eventsCleared.at)} UTC. New events will appear here.`
+    : "No timing events yet.";
+  $("event-rows").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 9, class: "muted" }, empty))]));
+  $("events-note").textContent = S.eventsCleared ? `showing events after #${S.eventsCleared.after}` : "";
+  $("btn-events-showall").style.display = S.eventsCleared ? "" : "none";
+  $("btn-events-clear").disabled = !shown.length;
+}
+
+$("btn-events-clear").onclick = async () => {
+  await refreshEvents();  // clear exactly what is newest right now
+  S.eventsCleared = { after: S.newestEventSeq || 0, at: new Date().toISOString() };
+  saveClear(S.eventsCleared);
+  await refreshEvents();
+  toast("Recent events list cleared (the event log is unchanged).", "ok", 4000);
+};
+$("btn-events-showall").onclick = async () => { S.eventsCleared = null; saveClear(null); await refreshEvents(); };
+
+async function refreshAll() { await refreshStatus(); await refreshCaps(true); await refreshEvents(); }
+refreshAll();
+renderMeters(); renderTestReads();
+setInterval(refreshStatus, 1000);
+setInterval(refreshEvents, 3000);
+setInterval(() => refreshCaps(true), 5000);   // antenna connect/disconnect events
+setInterval(() => { if (!S.test.active) return; renderMeters(); }, 250);  // decay current bars between polls
+</script>
+</body>
+</html>
