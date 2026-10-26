@@ -207,9 +207,10 @@ async def open_rshell(
                 f"SSH host key of {host} does not match the pinned key. If the reader was replaced, delete its "
                 f"entry from {host_keys.path}.",
             ) from None
-        except asyncssh.Error as exc:
+        except (asyncssh.Error, ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
             # Typically host-key / key-exchange negotiation failure against a legacy server
-            # (OpenSSH 4.x drops the connection when no host-key algorithm matches).
+            # (OpenSSH 4.x drops the connection when no host-key algorithm matches, often
+            # with a TCP reset rather than an SSH disconnect). Must precede OSError.
             last = exc
             log.debug("SSH to %s failed with %s host-key algorithms: %s", host, "legacy" if legacy else "modern", exc)
             continue

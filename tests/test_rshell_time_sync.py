@@ -178,6 +178,44 @@ async def test_second_run_uses_pinned_legacy_key_directly(tmp_path, rshell):
     assert res.success and res.legacy_ssh is True
 
 
+async def test_legacy_fallback_after_connection_reset(tmp_path, rshell):
+    """Real OpenSSH 4.x readers reset the TCP connection on the modern attempt instead of
+    sending an SSH disconnect; that must still trigger the legacy retry."""
+    connections = 0
+
+    async def handle(reader, writer):
+        nonlocal connections
+        connections += 1
+        if connections == 1:  # modern attempt: read the client banner, then RST
+            await reader.read(64)
+            sock = writer.get_extra_info("socket")
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+            writer.transport.abort()
+            return
+        up_r, up_w = await asyncio.open_connection("127.0.0.1", rshell.port)
+
+        async def pipe(src, dst):
+            try:
+                while data := await src.read(65536):
+                    dst.write(data)
+                    await dst.drain()
+            except ConnectionError:
+                pass
+            finally:
+                dst.close()
+
+        await asyncio.gather(pipe(reader, up_w), pipe(up_r, writer))
+
+    proxy = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = proxy.sockets[0].getsockname()[1]
+    try:
+        res = await sync_reader_time("127.0.0.1", port=port, host_keys=store(tmp_path))
+        assert res.success and res.legacy_ssh is True, res.error
+        assert connections >= 2
+    finally:
+        proxy.close()
+
+
 async def test_unreachable(tmp_path):
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
